@@ -41,8 +41,12 @@ fi
 
 # Форматируем и включаем swap
 if [ -b "/dev/zvol/$POOL_NAME/swap" ]; then
-    echo -e "${GREEN}Форматирование swap...${NC}"
+    echo -e "${GREEN}Настройка swap...${NC}"
+    # Отключаем swap если уже включен
+    swapoff /dev/zvol/$POOL_NAME/swap 2>/dev/null || true
+    # Форматируем
     mkswap -f /dev/zvol/$POOL_NAME/swap
+    # Включаем
     swapon /dev/zvol/$POOL_NAME/swap
 else
     echo -e "${YELLOW}Предупреждение: Swap zvol не найден, пропускаем...${NC}"
