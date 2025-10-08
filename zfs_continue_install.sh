@@ -50,11 +50,16 @@ fi
 
 echo -e "${GREEN}Монтирование файловых систем...${NC}"
 mount -t zfs "$POOL_NAME/root/nixos" /mnt
-mkdir -p /mnt/{home,nix,var/log,boot}
+mkdir -p /mnt/{home,nix,boot}
 mount -t zfs "$POOL_NAME/home" /mnt/home
 mount -t zfs "$POOL_NAME/nix" /mnt/nix
+
+# Монтируем var сначала, потом создаём log внутри
+mkdir -p /mnt/var
 mount -t zfs "$POOL_NAME/var" /mnt/var
+mkdir -p /mnt/var/log
 mount -t zfs "$POOL_NAME/var/log" /mnt/var/log
+
 mount "${DISK}p1" /mnt/boot
 
 echo -e "${GREEN}Создание снимка начальной установки...${NC}"
