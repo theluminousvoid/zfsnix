@@ -18,6 +18,16 @@ if ! zpool list "$POOL_NAME" &>/dev/null; then
     exit 1
 fi
 
+# Размонтируем если уже смонтировано
+echo -e "${YELLOW}Размонтирование предыдущих монтирований...${NC}"
+swapoff /dev/zvol/$POOL_NAME/swap 2>/dev/null || true
+umount /mnt/boot 2>/dev/null || true
+umount /mnt/var/log 2>/dev/null || true
+umount /mnt/var 2>/dev/null || true
+umount /mnt/nix 2>/dev/null || true
+umount /mnt/home 2>/dev/null || true
+umount /mnt 2>/dev/null || true
+
 # Ждём появления zvol устройства
 echo -e "${GREEN}Ожидание zvol устройства...${NC}"
 sleep 3
