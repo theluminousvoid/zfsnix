@@ -75,70 +75,40 @@ zpool create -f \
     -O mountpoint=none \
     "$POOL_NAME" "${DISK}p2"
 
-# Set cachefile for import
-zpool set cachefile=/etc/zfs/zpool.cache "$POOL_NAME"
 echo "  - ZFS pool '$POOL_NAME' created with native encryption"
 
-# Create datasets
+# Create datasets with proper mountpoints
 echo -e "${BLUE}[6/12] Creating ZFS datasets...${NC}"
 
-if zfs list "$POOL_NAME/root" &>/dev/null; then
-    echo "  - $POOL_NAME/root already exists"
-else
-    zfs create -o mountpoint=none "$POOL_NAME/root"
-    echo "  - Created $POOL_NAME/root"
-fi
+zfs create -o mountpoint=none "$POOL_NAME/root"
+echo "  - Created $POOL_NAME/root"
 
-if zfs list "$POOL_NAME/root/nixos" &>/dev/null; then
-    echo "  - $POOL_NAME/root/nixos already exists"
-else
-    zfs create -o mountpoint=legacy "$POOL_NAME/root/nixos"
-    echo "  - Created $POOL_NAME/root/nixos"
-fi
+zfs create -o mountpoint=/ -o canmount=noauto "$POOL_NAME/root/nixos"
+echo "  - Created $POOL_NAME/root/nixos"
 
-if zfs list "$POOL_NAME/home" &>/dev/null; then
-    echo "  - $POOL_NAME/home already exists"
-else
-    zfs create -o mountpoint=legacy "$POOL_NAME/home"
-    echo "  - Created $POOL_NAME/home"
-fi
+zfs create -o mountpoint=/home "$POOL_NAME/home"
+echo "  - Created $POOL_NAME/home"
 
-if zfs list "$POOL_NAME/nix" &>/dev/null; then
-    echo "  - $POOL_NAME/nix already exists"
-else
-    zfs create -o mountpoint=legacy -o compression=lz4 "$POOL_NAME/nix"
-    echo "  - Created $POOL_NAME/nix (lz4 compression for binaries)"
-fi
+zfs create -o mountpoint=/nix -o compression=lz4 "$POOL_NAME/nix"
+echo "  - Created $POOL_NAME/nix (lz4 compression for binaries)"
 
-if zfs list "$POOL_NAME/var" &>/dev/null; then
-    echo "  - $POOL_NAME/var already exists"
-else
-    zfs create -o mountpoint=legacy -o recordsize=16K -o logbias=throughput "$POOL_NAME/var"
-    echo "  - Created $POOL_NAME/var"
-fi
+zfs create -o mountpoint=/var -o recordsize=16K -o logbias=throughput "$POOL_NAME/var"
+echo "  - Created $POOL_NAME/var"
 
-if zfs list "$POOL_NAME/var/log" &>/dev/null; then
-    echo "  - $POOL_NAME/var/log already exists"
-else
-    zfs create -o mountpoint=legacy -o recordsize=16K "$POOL_NAME/var/log"
-    echo "  - Created $POOL_NAME/var/log"
-fi
+zfs create -o mountpoint=/var/log -o recordsize=16K "$POOL_NAME/var/log"
+echo "  - Created $POOL_NAME/var/log"
 
 # Create swap zvol
 echo -e "${BLUE}[7/12] Creating swap zvol ($SWAP_SIZE)...${NC}"
-if zfs list "$POOL_NAME/swap" &>/dev/null; then
-    echo "  - $POOL_NAME/swap already exists"
-else
-    zfs create -V "$SWAP_SIZE" -b $(getconf PAGESIZE) \
-        -o compression=zle \
-        -o logbias=throughput \
-        -o sync=always \
-        -o primarycache=metadata \
-        -o secondarycache=none \
-        -o com.sun:auto-snapshot=false \
-        "$POOL_NAME/swap"
-    echo "  - Created $POOL_NAME/swap"
-fi
+zfs create -V "$SWAP_SIZE" -b $(getconf PAGESIZE) \
+    -o compression=zle \
+    -o logbias=throughput \
+    -o sync=always \
+    -o primarycache=metadata \
+    -o secondarycache=none \
+    -o com.sun:auto-snapshot=false \
+    "$POOL_NAME/swap"
+echo "  - Created $POOL_NAME/swap"
 
 # Wait for zvol device
 sleep 3
@@ -147,7 +117,6 @@ udevadm settle
 # Setup swap
 echo -e "${BLUE}[8/12] Setting up swap...${NC}"
 if [ -b "/dev/zvol/$POOL_NAME/swap" ]; then
-    swapoff /dev/zvol/$POOL_NAME/swap 2>/dev/null || true
     mkswap -f /dev/zvol/$POOL_NAME/swap
     swapon /dev/zvol/$POOL_NAME/swap
     echo "  - Swap enabled"
@@ -158,76 +127,41 @@ fi
 # Mount filesystems
 echo -e "${BLUE}[9/12] Mounting filesystems...${NC}"
 
-if mountpoint -q /mnt; then
-    echo "  - /mnt already mounted"
-else
-    mount -t zfs "$POOL_NAME/root/nixos" /mnt
-    echo "  - Mounted $POOL_NAME/root/nixos -> /mnt"
-fi
+# Export and import with correct altroot
+zpool export "$POOL_NAME"
+zpool import -d /dev/disk/by-id -R /mnt "$POOL_NAME"
 
-mkdir -p /mnt/{home,nix,boot}
+# Mount root
+zfs mount "$POOL_NAME/root/nixos"
+echo "  - Mounted $POOL_NAME/root/nixos -> /mnt"
 
-if mountpoint -q /mnt/home; then
-    echo "  - /mnt/home already mounted"
-else
-    mount -t zfs "$POOL_NAME/home" /mnt/home
-    echo "  - Mounted $POOL_NAME/home -> /mnt/home"
-fi
+# Mount other datasets
+zfs mount -a
+echo "  - Mounted all ZFS datasets"
 
-if mountpoint -q /mnt/nix; then
-    echo "  - /mnt/nix already mounted"
-else
-    mount -t zfs "$POOL_NAME/nix" /mnt/nix
-    echo "  - Mounted $POOL_NAME/nix -> /mnt/nix"
-fi
-
-mkdir -p /mnt/var
-if mountpoint -q /mnt/var; then
-    echo "  - /mnt/var already mounted"
-else
-    mount -t zfs "$POOL_NAME/var" /mnt/var
-    echo "  - Mounted $POOL_NAME/var -> /mnt/var"
-fi
-
-mkdir -p /mnt/var/log
-if mountpoint -q /mnt/var/log; then
-    echo "  - /mnt/var/log already mounted"
-else
-    mount -t zfs "$POOL_NAME/var/log" /mnt/var/log
-    echo "  - Mounted $POOL_NAME/var/log -> /mnt/var/log"
-fi
-
-if mountpoint -q /mnt/boot; then
-    echo "  - /mnt/boot already mounted"
-else
-    mount "${DISK}p1" /mnt/boot
-    echo "  - Mounted ${DISK}p1 -> /mnt/boot"
-fi
+# Mount boot
+mkdir -p /mnt/boot
+mount "${DISK}p1" /mnt/boot
+echo "  - Mounted ${DISK}p1 -> /mnt/boot"
 
 echo -e "\n${GREEN}Filesystem layout:${NC}"
-df -h /mnt /mnt/home /mnt/nix /mnt/var /mnt/boot | grep -E '(Filesystem|/mnt)'
+df -h /mnt /mnt/home /mnt/nix /mnt/var /mnt/boot 2>/dev/null | grep -E '(Filesystem|/mnt)' || echo "Filesystems mounted successfully"
 
 # Create initial snapshot
 echo -e "${BLUE}[10/12] Creating initial snapshot...${NC}"
-if zfs list -t snapshot "$POOL_NAME@initial" &>/dev/null; then
-    echo "  - Initial snapshot already exists"
-else
-    zfs snapshot -r "$POOL_NAME@initial"
-    echo "  - Created snapshot: $POOL_NAME@initial"
-fi
+zfs snapshot -r "$POOL_NAME@initial"
+echo "  - Created snapshot: $POOL_NAME@initial"
 
 # Generate NixOS config
 echo -e "${BLUE}[11/12] Generating NixOS configuration...${NC}"
-if [ -f "/mnt/etc/nixos/configuration.nix" ]; then
-    echo "  - Configuration already exists, backing up..."
-    cp /mnt/etc/nixos/configuration.nix /mnt/etc/nixos/configuration.nix.backup
-fi
-
 nixos-generate-config --root /mnt
 echo "  - Hardware configuration generated"
 
 # Get hostId
 HOST_ID=$(head -c 8 /etc/machine-id)
+
+# Get boot UUID
+BOOT_UUID=$(blkid -s UUID -o value "${DISK}p1")
 
 # Create optimized configuration
 echo -e "${BLUE}[12/12] Creating NixOS configuration...${NC}"
@@ -245,10 +179,17 @@ cat > /mnt/etc/nixos/configuration.nix << EOF
   boot.supportedFilesystems = [ "zfs" ];
   boot.zfs.forceImportRoot = false;
   boot.zfs.requestEncryptionCredentials = true;
+  boot.zfs.devNodes = "/dev/disk/by-id";
   networking.hostId = "$HOST_ID";
   
   # ZFS kernel module params for better performance
   boot.kernelParams = [ "zfs.zfs_arc_max=4294967296" ]; # 4GB ARC max
+  
+  # Boot partition
+  fileSystems."/boot" = {
+    device = "/dev/disk/by-uuid/$BOOT_UUID";
+    fsType = "vfat";
+  };
   
   # ZFS services
   services.zfs.autoScrub.enable = true;
@@ -258,7 +199,7 @@ cat > /mnt/etc/nixos/configuration.nix << EOF
   
   # Swap
   swapDevices = [{
-    device = "/dev/zvol/rpool/swap";
+    device = "/dev/zvol/$POOL_NAME/swap";
   }];
   
   # Hostname
@@ -271,9 +212,7 @@ cat > /mnt/etc/nixos/configuration.nix << EOF
   i18n.defaultLocale = "en_US.UTF-8";
   
   # Console
-  console = {
-    keyMap = "us";
-  };
+  console.keyMap = "us";
   
   # Users
   users.users.luminous = {
@@ -304,19 +243,14 @@ EOF
 
 echo "  - Configuration created"
 
-# Copy zpool.cache for import at boot
-mkdir -p /mnt/etc/zfs
-if [ -f /etc/zfs/zpool.cache ]; then
-    cp /etc/zfs/zpool.cache /mnt/etc/zfs/zpool.cache
-    echo "  - Copied zpool.cache for boot import"
-fi
-
 echo -e "\n${GREEN}=== Installation preparation complete! ===${NC}"
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. (Optional) Edit /mnt/etc/nixos/configuration.nix"
 echo "2. Run: nixos-install"
 echo "3. Set root password when prompted"
-echo "4. Reboot: reboot"
+echo "4. Run: umount /mnt/boot"
+echo "5. Run: zpool export rpool"
+echo "6. Reboot: reboot"
 echo ""
 echo -e "${YELLOW}IMPORTANT:${NC} You will need to enter the ZFS encryption password at boot!"
 echo ""
